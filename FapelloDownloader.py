@@ -34,10 +34,10 @@ from os.path import (
 # Third-party library imports
 from re             import compile as re_compile
 from requests       import get as requests_get
+from requests.exceptions import Timeout
 from fnmatch        import filter as fnmatch_filter
 from PIL.Image      import open as pillow_image_open
 from bs4            import BeautifulSoup
-from urllib.request import Request, urlopen
 
 
 
@@ -306,32 +306,44 @@ def get_Fapello_files_number(url: str) -> int:
     return 0
 
 def thread_download_file(
-        link: str, 
-        target_dir: str, 
+        link: str,
+        target_dir: str,
         index: int
         ) -> None:
-    
-    link       = link + str(index)       
+
+    link       = link + str(index)
     model_name = link.split('/')[3]
 
     file_url, file_type = get_Fapello_file_url(link)
 
     if file_url != None and model_name in file_url:
-        try:        
-            file_name = prepare_filename(file_url, index, file_type)
-            file_path = os_path_join(target_dir, file_name)
+        file_name = prepare_filename(file_url, index, file_type)
+        file_path = os_path_join(target_dir, file_name)
+        print(f"> Downloading {file_url} -> {file_name}")
 
-            request  = Request(file_url, headers = HEADERS_FOR_REQUESTS)
-            response = urlopen(request)
+        try:
+            response = requests_get(
+                file_url,
+                headers = HEADERS_FOR_REQUESTS,
+                stream  = True,
+                timeout = 300
+            )
 
-            with open(file_path, 'wb') as output_file: output_file.write(response.read())
+            with open(file_path, 'wb') as output_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        output_file.write(chunk)
 
-        except:
-            pass
+            print(f"> Saved {file_path}")
+
+        except Timeout:
+            print(f"! Timeout downloading {file_url}, skipping.")
+        except Exception as error:
+            print(f"! Error downloading {file_url}: {error}")
                 
 def download_orchestrator(
         processing_queue: multiprocessing_Queue,
-        selected_link: str, 
+        selected_link: str,
         cpu_number: int
         ):
     
@@ -339,12 +351,14 @@ def download_orchestrator(
     list_of_index = []
 
     write_process_status(processing_queue, DOWNLOADING_STATUS)
-    
+
     try:
         create_temp_dir(target_dir)
         how_many_files = get_Fapello_files_number(selected_link)
         list_of_index  = [index for index in range(how_many_files)]
-        
+
+        print(f"Starting download of {how_many_files} files to '{target_dir}' with {cpu_number} threads")
+
         with ThreadPool(cpu_number) as pool:
             pool.starmap(
                 thread_download_file,
@@ -354,11 +368,12 @@ def download_orchestrator(
                     list_of_index
                 ) 
             )
-            
+
         write_process_status(processing_queue, COMPLETED_STATUS)
+        print("All downloads completed")
 
     except Exception as error:
-        print(error) 
+        print(f"Error during download: {error}")
         pass
 
 
