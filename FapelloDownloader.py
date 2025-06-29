@@ -34,10 +34,10 @@ from os.path import (
 # Third-party library imports
 from re             import compile as re_compile
 from requests       import get as requests_get
+from requests.exceptions import Timeout
 from fnmatch        import filter as fnmatch_filter
 from PIL.Image      import open as pillow_image_open
 from bs4            import BeautifulSoup
-from urllib.request import Request, urlopen
 
 
 
@@ -86,9 +86,10 @@ def find_by_relative_path(relative_path: str) -> str:
     base_path = getattr(sys, '_MEIPASS', os_path_dirname(os_path_abspath(__file__)))
     return os_path_join(base_path, relative_path)
 
-def create_temp_dir(name_dir: str) -> None:
-    if os_path_exists(name_dir): remove_directory(name_dir)
-    if not os_path_exists(name_dir): os_makedirs(name_dir, mode=0o777)
+def ensure_directory(name_dir: str) -> None:
+    """Create the folder if it does not already exist."""
+    if not os_path_exists(name_dir):
+        os_makedirs(name_dir, mode=0o777)
 
 def stop_thread() -> None: 
     stop = 1 + "x"
@@ -306,32 +307,60 @@ def get_Fapello_files_number(url: str) -> int:
     return 0
 
 def thread_download_file(
-        link: str, 
-        target_dir: str, 
-        index: int
+        link: str,
+        target_dir: str,
+        index: int,
+        total_files: int
         ) -> None:
-    
-    link       = link + str(index)       
+
+    link       = link + str(index)
     model_name = link.split('/')[3]
 
     file_url, file_type = get_Fapello_file_url(link)
 
     if file_url != None and model_name in file_url:
-        try:        
-            file_name = prepare_filename(file_url, index, file_type)
-            file_path = os_path_join(target_dir, file_name)
+        file_name = prepare_filename(file_url, index, file_type)
+        file_path = os_path_join(target_dir, file_name)
 
-            request  = Request(file_url, headers = HEADERS_FOR_REQUESTS)
-            response = urlopen(request)
+        if os_path_exists(file_path):
+            print(f"! {file_name} already exists, skipping")
+            return
 
-            with open(file_path, 'wb') as output_file: output_file.write(response.read())
+        print(f"> Downloading {file_url} -> {file_name}")
 
-        except:
-            pass
+        try:
+            response = requests_get(
+                file_url,
+                headers = HEADERS_FOR_REQUESTS,
+                stream  = True,
+                timeout = 300
+            )
+
+            total_bytes = int(response.headers.get('content-length', 0))
+            bytes_written = 0
+            progress = 0
+
+            with open(file_path, 'wb') as output_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        output_file.write(chunk)
+                        bytes_written += len(chunk)
+                        if total_bytes:
+                            new_progress = int(bytes_written * 100 / total_bytes)
+                            if new_progress // 10 > progress // 10:
+                                progress = new_progress
+                                print(f"  {file_name}: {progress}%")
+
+            print(f"> Saved {file_path} ({index + 1}/{total_files})")
+
+        except Timeout:
+            print(f"! Timeout downloading {file_url}, skipping.")
+        except Exception as error:
+            print(f"! Error downloading {file_url}: {error}")
                 
 def download_orchestrator(
         processing_queue: multiprocessing_Queue,
-        selected_link: str, 
+        selected_link: str,
         cpu_number: int
         ):
     
@@ -339,26 +368,30 @@ def download_orchestrator(
     list_of_index = []
 
     write_process_status(processing_queue, DOWNLOADING_STATUS)
-    
+
     try:
-        create_temp_dir(target_dir)
+        ensure_directory(target_dir)
         how_many_files = get_Fapello_files_number(selected_link)
         list_of_index  = [index for index in range(how_many_files)]
-        
+
+        print(f"Starting download of {how_many_files} files to '{target_dir}' with {cpu_number} threads")
+
         with ThreadPool(cpu_number) as pool:
             pool.starmap(
                 thread_download_file,
                 zip(
-                    itertools_repeat(selected_link), 
-                    itertools_repeat(target_dir), 
-                    list_of_index
-                ) 
+                    itertools_repeat(selected_link),
+                    itertools_repeat(target_dir),
+                    list_of_index,
+                    itertools_repeat(how_many_files)
+                )
             )
-            
+
         write_process_status(processing_queue, COMPLETED_STATUS)
+        print("All downloads completed")
 
     except Exception as error:
-        print(error) 
+        print(f"Error during download: {error}")
         pass
 
 
