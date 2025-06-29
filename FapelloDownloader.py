@@ -42,7 +42,7 @@ from urllib.request import Request, urlopen
 
 
 # GUI imports
-from tkinter import StringVar, CENTER
+from tkinter import StringVar, CENTER, PhotoImage
 from customtkinter import (
     CTk,
     CTkButton,
@@ -749,7 +749,13 @@ class App:
         window.geometry("500x500")
         window.minsize(width, height)
         window.resizable(False, False)
-        window.iconbitmap(find_by_relative_path("Assets" + os_separator + "logo.ico"))
+        if sys.platform.startswith("win"):
+            window.iconbitmap(find_by_relative_path("Assets" + os_separator + "logo.ico"))
+        else:
+            window.iconphoto(
+                True,
+                PhotoImage(file=find_by_relative_path("Assets" + os_separator + "logo.png"))
+            )
 
         window.protocol("WM_DELETE_WINDOW", on_app_close)
 
@@ -782,7 +788,10 @@ if __name__ == "__main__":
     selected_cpu_number.set("6")
     info_message.set("Hi :)")
 
-    font   = "Segoe UI"    
+    if sys.platform == "darwin":
+        font = "Helvetica"
+    else:
+        font = "Segoe UI"
     bold8  = CTkFont(family = font, size = 8, weight = "bold")
     bold9  = CTkFont(family = font, size = 9, weight = "bold")
     bold10 = CTkFont(family = font, size = 10, weight = "bold")

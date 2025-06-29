@@ -34,6 +34,21 @@ Fapello.Downloader is completely written in Python, from backend to frontend. Ex
 * Wait for the download to complete
 * A folder will be created with all images/videos
 
+### Running on macOS
+1. Install Python 3.10 or later. The easiest way is via [Homebrew](https://brew.sh/):
+   ```bash
+   brew install python
+   ```
+2. Install the required Python packages:
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+3. Launch the program:
+   ```bash
+   python3 FapelloDownloader.py
+   ```
+
+
 ## Next steps. 🤫
 - [ ] Update libraries 
     - [x] Python 3.10 (expecting ~10% more performance) 
