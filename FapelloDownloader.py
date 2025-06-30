@@ -217,6 +217,7 @@ def download_button_command() -> None:
         return
 
     selected_link = str(selected_url.get()).strip()
+    target_dir    = str(selected_download_path.get()).strip()
 
     if selected_link == "Paste link here https://fapello.com/emily-rat---/":
         info_message.set("Insert a valid Fapello.com link")
