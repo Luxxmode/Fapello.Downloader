@@ -2,6 +2,7 @@
 
 # Standard library imports
 import sys
+import time
 from time       import sleep
 from webbrowser import open as open_browser
 from warnings   import filterwarnings
@@ -34,10 +35,10 @@ from os.path import (
 # Third-party library imports
 from re             import compile as re_compile
 from requests       import get as requests_get
+from requests.exceptions import Timeout, RequestException
 from fnmatch        import filter as fnmatch_filter
 from PIL.Image      import open as pillow_image_open
 from bs4            import BeautifulSoup
-from urllib.request import Request, urlopen
 
 
 
@@ -86,9 +87,10 @@ def find_by_relative_path(relative_path: str) -> str:
     base_path = getattr(sys, '_MEIPASS', os_path_dirname(os_path_abspath(__file__)))
     return os_path_join(base_path, relative_path)
 
-def create_temp_dir(name_dir: str) -> None:
-    if os_path_exists(name_dir): remove_directory(name_dir)
-    if not os_path_exists(name_dir): os_makedirs(name_dir, mode=0o777)
+def ensure_directory(name_dir: str) -> None:
+    """Create the folder if it does not already exist."""
+    if not os_path_exists(name_dir):
+        os_makedirs(name_dir, mode=0o777)
 
 def stop_thread() -> None: 
     stop = 1 + "x"
@@ -137,12 +139,12 @@ def count_files_in_directory(target_dir: str) -> int:
     return len(fnmatch_filter(os_listdir(target_dir), '*.*'))
 
 def thread_check_steps_download(
-        link: str, 
-        how_many_files: int
+        link: str,
+        how_many_files: int,
+        target_dir: str
         ) -> None:
     
     sleep(1)
-    target_dir = link.split("/")[3]
 
     try:
         while True:
@@ -182,6 +184,7 @@ def thread_check_steps_download(
 def check_button_command() -> None:
 
     selected_link = str(selected_url.get()).strip()
+    target_dir    = str(selected_download_path.get()).strip()
 
     if selected_link == "Paste link here https://fapello.com/emily-rat---/": info_message.set("Insert a valid Fapello.com link")
 
@@ -232,11 +235,15 @@ def download_button_command() -> None:
         if how_many_images == 0:
             info_message.set("No files found for this link")
         else: 
+            if not target_dir:
+                target_dir = selected_link.split("/")[3]
+
             process_download = Process(
                 target = download_orchestrator,
                 args = (
                     processing_queue,
-                    selected_link, 
+                    selected_link,
+                    target_dir,
                     cpu_number
                     )
                 )
@@ -245,8 +252,9 @@ def download_button_command() -> None:
             thread_wait = Thread(
                 target = thread_check_steps_download,
                 args = (
-                    selected_link, 
-                    how_many_images
+                    selected_link,
+                    how_many_images,
+                    target_dir
                     )
                 )
             thread_wait.start()
@@ -270,95 +278,149 @@ def stop_button_command() -> None:
     write_process_status(processing_queue, f"{STOP_STATUS}") 
 
 def get_Fapello_file_url(link: str) -> tuple:
-    
-    page = requests_get(link, headers = HEADERS_FOR_REQUESTS)
-    soup = BeautifulSoup(page.content, "html.parser")
-    file_element = soup.find("div", class_="flex justify-between items-center")
-    try: 
+    """Return the direct file URL and its type from a page."""
+
+    try:
+        page = requests_get(link, headers=HEADERS_FOR_REQUESTS, timeout=30)
+        page.raise_for_status()
+        soup = BeautifulSoup(page.content, "html.parser")
+        file_element = soup.find("div", class_="flex justify-between items-center")
+
         if 'type="video/mp4' in str(file_element):
             file_url  = file_element.find("source").get("src")
             file_type = "video"
-            print(f" > Video: {file_url}")
+            print(f" > Video: {file_url}", flush=True)
         else:
             file_url  = file_element.find("img").get("src")
             file_type = "image"
-            print(f" > Image: {file_url}")
+            print(f" > Image: {file_url}", flush=True)
 
         return file_url, file_type
-    except:
+
+    except Exception as error:
+        print(f"! Error parsing {link}: {error}", flush=True)
         return None, None
 
 def get_Fapello_files_number(url: str) -> int:
-    
-    page = requests_get(url, headers = HEADERS_FOR_REQUESTS)
-    soup = BeautifulSoup(page.content, "html.parser")
+    """Return the number of files available for a given gallery."""
 
-    all_href_links = soup.find_all('a', href = re_compile(url))
+    try:
+        page = requests_get(url, headers=HEADERS_FOR_REQUESTS, timeout=30)
+        page.raise_for_status()
+        soup = BeautifulSoup(page.content, "html.parser")
 
-    for link in all_href_links:
-        link_href          = link.get('href')
-        link_href_stripped = link_href.rstrip('/')
-        link_href_numeric  = link_href_stripped.split('/')[-1]
-        if link_href_numeric.isnumeric():
-            print(f"> Found {link_href_numeric} files")
-            return int(link_href_numeric) + 1
+        all_href_links = soup.find_all('a', href=re_compile(url))
+
+        for link in all_href_links:
+            link_href          = link.get('href')
+            link_href_stripped = link_href.rstrip('/')
+            link_href_numeric  = link_href_stripped.split('/')[-1]
+            if link_href_numeric.isnumeric():
+                print(f"> Found {link_href_numeric} files", flush=True)
+                return int(link_href_numeric) + 1
+
+    except Exception as error:
+        print(f"! Error retrieving file count: {error}", flush=True)
 
     return 0
 
 def thread_download_file(
-        link: str, 
-        target_dir: str, 
-        index: int
+        link: str,
+        target_dir: str,
+        index: int,
+        total_files: int
         ) -> None:
-    
-    link       = link + str(index)       
+
+    link       = link + str(index)
     model_name = link.split('/')[3]
 
     file_url, file_type = get_Fapello_file_url(link)
 
     if file_url != None and model_name in file_url:
-        try:        
-            file_name = prepare_filename(file_url, index, file_type)
-            file_path = os_path_join(target_dir, file_name)
+        file_name = prepare_filename(file_url, index, file_type)
+        file_path = os_path_join(target_dir, file_name)
 
-            request  = Request(file_url, headers = HEADERS_FOR_REQUESTS)
-            response = urlopen(request)
+        if os_path_exists(file_path):
+            print(f"! {file_name} already exists, skipping", flush=True)
+            return
 
-            with open(file_path, 'wb') as output_file: output_file.write(response.read())
+        print(f"> Downloading {file_url} -> {file_name}", flush=True)
 
-        except:
-            pass
+        try:
+            response = requests_get(
+                file_url,
+                headers=HEADERS_FOR_REQUESTS,
+                stream=True,
+                timeout=(10, 30)
+            )
+            response.raise_for_status()
+
+            total_bytes = int(response.headers.get('content-length', 0))
+            bytes_written = 0
+            progress = 0
+            last_chunk_time = time.time()
+
+            with open(file_path, 'wb') as output_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        output_file.write(chunk)
+                        bytes_written += len(chunk)
+                        if total_bytes:
+                            new_progress = int(bytes_written * 100 / total_bytes)
+                            if new_progress // 10 > progress // 10:
+                                progress = new_progress
+                                print(f"  {file_name}: {progress}%", flush=True)
+                        last_chunk_time = time.time()
+                    if time.time() - last_chunk_time > 300:
+                        print(f"! Download stalled for {file_name}, skipping", flush=True)
+                        return
+
+            print(f"> Saved {file_path} ({index + 1}/{total_files})", flush=True)
+
+        except Timeout:
+            print(f"! Timeout downloading {file_url}, skipping", flush=True)
+        except RequestException as error:
+            print(f"! Error downloading {file_url}: {error}", flush=True)
+        except Exception as error:
+            print(f"! Unexpected error downloading {file_url}: {error}", flush=True)
                 
 def download_orchestrator(
         processing_queue: multiprocessing_Queue,
-        selected_link: str, 
+        selected_link: str,
+        target_dir: str,
         cpu_number: int
         ):
-    
-    target_dir    = selected_link.split("/")[3]
+
     list_of_index = []
 
     write_process_status(processing_queue, DOWNLOADING_STATUS)
-    
+
     try:
-        create_temp_dir(target_dir)
+        ensure_directory(target_dir)
         how_many_files = get_Fapello_files_number(selected_link)
         list_of_index  = [index for index in range(how_many_files)]
-        
+
+        print(
+            f"Starting download of {how_many_files} files to '{target_dir}' with {cpu_number} threads",
+            flush=True
+        )
+
         with ThreadPool(cpu_number) as pool:
             pool.starmap(
                 thread_download_file,
                 zip(
-                    itertools_repeat(selected_link), 
-                    itertools_repeat(target_dir), 
-                    list_of_index
-                ) 
+                    itertools_repeat(selected_link),
+                    itertools_repeat(target_dir),
+                    list_of_index,
+                    itertools_repeat(how_many_files)
+                )
             )
-            
+
         write_process_status(processing_queue, COMPLETED_STATUS)
+        print("All downloads completed", flush=True)
 
     except Exception as error:
-        print(error) 
+        print(f"Error during download: {error}", flush=True)
         pass
 
 
@@ -455,6 +517,10 @@ def place_app_name():
 def place_link_textbox():
     link_textbox = create_text_box(selected_url, 150, 32)
     link_textbox.place(relx = 0.435, rely = 0.3, relwidth = 0.7, anchor = CENTER)
+
+def place_target_dir_textbox():
+    path_textbox = create_text_box(selected_download_path, 150, 32)
+    path_textbox.place(relx = 0.435, rely = 0.36, relwidth = 0.7, anchor = CENTER)
 
 def place_check_button():
     check_button = CTkButton(
@@ -758,6 +824,7 @@ class App:
         place_github_button()
         place_telegram_button()
         place_link_textbox()
+        place_target_dir_textbox()
         place_check_button()
         place_simultaneous_downloads_textbox()
         place_tips()
@@ -774,11 +841,13 @@ if __name__ == "__main__":
 
     window = CTk() 
 
-    selected_url        = StringVar()
-    info_message        = StringVar()
-    selected_cpu_number = StringVar()
+    selected_url           = StringVar()
+    selected_download_path = StringVar()
+    info_message           = StringVar()
+    selected_cpu_number    = StringVar()
 
     selected_url.set("Paste link here https://fapello.com/emily-rat---/")
+    selected_download_path.set("")
     selected_cpu_number.set("6")
     info_message.set("Hi :)")
 
