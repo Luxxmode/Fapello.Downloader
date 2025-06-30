@@ -36,6 +36,7 @@ from os.path import (
 from re             import compile as re_compile
 from requests       import get as requests_get
 from requests.exceptions import Timeout, RequestException
+from urllib.parse   import urlparse
 from fnmatch        import filter as fnmatch_filter
 from PIL.Image      import open as pillow_image_open
 from bs4            import BeautifulSoup
@@ -91,6 +92,12 @@ def ensure_directory(name_dir: str) -> None:
     """Create the folder if it does not already exist."""
     if not os_path_exists(name_dir):
         os_makedirs(name_dir, mode=0o777)
+
+def get_session_folder_name(link: str) -> str:
+    """Return a human-friendly folder name extracted from the gallery link."""
+    path = urlparse(link).path.strip('/')
+    slug = path.split('/')[0]
+    return slug.replace('-', ' ').title()
 
 def stop_thread() -> None: 
     stop = 1 + "x"
@@ -184,7 +191,8 @@ def thread_check_steps_download(
 def check_button_command() -> None:
 
     selected_link = str(selected_url.get()).strip()
-    target_dir    = str(selected_download_path.get()).strip()
+    # base_dir can remain unused here but it ensures the path is read so the variable is not left empty
+    base_dir      = str(selected_download_path.get()).strip()
 
     if selected_link == "Paste link here https://fapello.com/emily-rat---/": info_message.set("Insert a valid Fapello.com link")
 
@@ -217,7 +225,7 @@ def download_button_command() -> None:
         return
 
     selected_link = str(selected_url.get()).strip()
-    target_dir    = str(selected_download_path.get()).strip()
+    base_dir      = str(selected_download_path.get()).strip()
 
     if selected_link == "Paste link here https://fapello.com/emily-rat---/":
         info_message.set("Insert a valid Fapello.com link")
@@ -235,16 +243,18 @@ def download_button_command() -> None:
 
         if how_many_images == 0:
             info_message.set("No files found for this link")
-        else: 
-            if not target_dir:
-                target_dir = selected_link.split("/")[3]
+        else:
+            session_folder = get_session_folder_name(selected_link)
+            if not base_dir:
+                base_dir = "."
+            full_target_dir = os_path_join(base_dir, session_folder)
 
             process_download = Process(
                 target = download_orchestrator,
                 args = (
                     processing_queue,
                     selected_link,
-                    target_dir,
+                    full_target_dir,
                     cpu_number
                     )
                 )
@@ -255,7 +265,7 @@ def download_button_command() -> None:
                 args = (
                     selected_link,
                     how_many_images,
-                    target_dir
+                    full_target_dir
                     )
                 )
             thread_wait.start()
@@ -518,6 +528,16 @@ def place_app_name():
 def place_link_textbox():
     link_textbox = create_text_box(selected_url, 150, 32)
     link_textbox.place(relx = 0.435, rely = 0.3, relwidth = 0.7, anchor = CENTER)
+
+def place_target_dir_label():
+    label = CTkLabel(
+        master = window,
+        text = "Folder Path",
+        text_color = "#C0C0C0",
+        font = bold11,
+        anchor = "e"
+    )
+    label.place(relx = 0.2, rely = 0.36, anchor = CENTER)
 
 def place_target_dir_textbox():
     path_textbox = create_text_box(selected_download_path, 150, 32)
@@ -825,6 +845,7 @@ class App:
         place_github_button()
         place_telegram_button()
         place_link_textbox()
+        place_target_dir_label()
         place_target_dir_textbox()
         place_check_button()
         place_simultaneous_downloads_textbox()

@@ -30,10 +30,10 @@ Fapello.Downloader is completely written in Python, from backend to frontend. Ex
 ## How to use. 👨‍💻
 * Copy the Fapello link of interest (for example: https://fapello.com/mia-kha***/)
 * Paste the copied link in FapelloDownloader textbox
-* (Optional) enter a target folder path
+* (Optional) enter a folder path
 * Press Download button
 * Wait for the download to complete
-* Files will be saved to the chosen folder (created if necessary)
+* Files will be saved inside a subfolder named after the link (created if necessary)
 
 ## Next steps. 🤫
 - [ ] Update libraries 
